@@ -1,74 +1,57 @@
 import random
 import re
 import json
+from pathlib import Path
+
 import streamlit as st
 import streamlit.components.v1 as components
 
-MAPPING_FILE = "emoji_mapping.txt"  # nome do TXT com o alfabeto
+# -----------------------------
+# Carregar mapeamentos do TXT
+# -----------------------------
+@st.cache_data
+def load_mappings(path: str = "emoji_mapping.txt"):
+    """
+    Lê o arquivo emoji_mapping.txt no formato:
+    A,emoji1,emoji2,...
+    ...
+    Z,emoji1,emoji2,...
 
-# -----------------------------
-# Carregar mapeamento do TXT
-# -----------------------------
-def load_mapping_from_txt(path: str):
+    Retorna:
+        LETTER_TO_EMOJIS (dict[str, list[str]])
+        EMOJI_TO_LETTER (dict[str, str])
     """
-    Lê um arquivo com linhas no formato:
-    A[emoji1][emoji2]...[emojiN]
-    (também tolera coisas como 'A - [emoji1][emoji2]...')
-    e retorna dict { 'A': [emoji1, emoji2, ...], ... }.
-    """
-    mapping = {}
-    with open(path, encoding="utf-8") as f:
+    file_path = Path(path)
+    if not file_path.exists():
+        raise FileNotFoundError(
+            f"Arquivo de mapeamento não encontrado: {file_path.resolve()}"
+        )
+
+    letter_to_emojis = {}
+    emoji_to_letter = {}
+
+    with file_path.open("r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
+                continue  # pula linhas em branco
+            parts = line.split(",")
+            if len(parts) < 2:
+                continue  # ignora linhas mal-formadas
+            letter = parts[0].strip().upper()
+            emojis = [p for p in parts[1:] if p]
+
+            if not letter.isalpha() or len(letter) != 1:
                 continue
 
-            # primeira letra da linha é a chave (A-Z)
-            m = re.match(r"^([A-Za-z])(.*)$", line)
-            if not m:
-                continue
-            letter = m.group(1).upper()
-            rest = m.group(2)
+            letter_to_emojis[letter] = emojis
+            for e in emojis:
+                emoji_to_letter[e] = letter
 
-            # pega tudo que estiver entre colchetes [ ... ]
-            emojis = re.findall(r"\[(.*?)\]", rest)
-            if emojis:
-                mapping[letter] = emojis
-
-    return mapping
+    return letter_to_emojis, emoji_to_letter
 
 
-# -----------------------------
-# App Streamlit - config
-# -----------------------------
-st.set_page_config(
-    page_title="Emoji Cipher",
-    page_icon="🔐",
-    layout="centered",
-)
-
-st.title("🔤 ➜ 😊 Emoji Cipher")
-st.caption("Digite texto e brinque de codificar/decodificar com o alfabeto de emojis.")
-
-# tenta carregar o arquivo de mapeamento
-try:
-    LETTER_TO_EMOJIS = load_mapping_from_txt(MAPPING_FILE)
-except FileNotFoundError:
-    LETTER_TO_EMOJIS = {}
-
-if not LETTER_TO_EMOJIS:
-    st.error(
-        f"Arquivo de mapeamento não encontrado ou vazio.\n"
-        f"Verifique se '{MAPPING_FILE}' existe e está no formato correto."
-    )
-    st.stop()
-
-# mapeamento inverso emoji -> letra
-EMOJI_TO_LETTER = {
-    emoji: letter
-    for letter, emojis in LETTER_TO_EMOJIS.items()
-    for emoji in emojis
-}
+LETTER_TO_EMOJIS, EMOJI_TO_LETTER = load_mappings("emoji_mapping.txt")
 
 # -----------------------------
 # Funções auxiliares
@@ -86,7 +69,7 @@ def encode_text(text: str) -> str:
         else:
             # mantém espaços, pontuação, quebras de linha etc.
             tokens.append(ch)
-    # espaço entre tokens para facilitar ler/copiar
+    # junta com espaço para facilitar o split depois
     return " ".join(tokens)
 
 
@@ -111,7 +94,7 @@ def copy_button(text: str, label: str = "Copiar para área de transferência"):
     """Cria um botão simples de copiar para o clipboard via JS."""
     if not text:
         return
-    js_text = json.dumps(text)  # escapa bonitinho pra JS
+    js_text = json.dumps(text)  # escapa direitinho pra JS
     html = f"""
     <button onclick='navigator.clipboard.writeText({js_text})'>
         {label}
@@ -119,10 +102,18 @@ def copy_button(text: str, label: str = "Copiar para área de transferência"):
     """
     components.html(html, height=40)
 
+# -----------------------------
+# App Streamlit
+# -----------------------------
+st.set_page_config(
+    page_title="Emoji Cipher",
+    page_icon="🔐",
+    layout="centered",
+)
 
-# -----------------------------
-# Layout principal
-# -----------------------------
+st.title("🔤 ➜ 😊 Emoji Cipher")
+st.caption("Digite texto e brinque de codificar/decodificar com o alfabeto de emojis.")
+
 tab_encode, tab_decode = st.tabs(
     ["Codificar (texto ➜ emojis)", "Decodificar (emojis ➜ texto)"]
 )

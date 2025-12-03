@@ -1,6 +1,7 @@
 import random
 import re
 import json
+import unicodedata
 from pathlib import Path
 
 import streamlit as st
@@ -58,10 +59,19 @@ LETTER_TO_EMOJIS, EMOJI_TO_LETTER = load_mappings("emoji_mapping.txt")
 # -----------------------------
 # Funções auxiliares
 # -----------------------------
+
+def remove_accents(ch: str) -> str:
+    """Remove acentos de um caractere (ex.: 'é' -> 'e', 'ã' -> 'a')."""
+    # Normaliza em NFD e remove caracteres de marcação (Mn = Mark, Nonspacing)
+    normalized = unicodedata.normalize("NFD", ch)
+    return "".join(c for c in normalized if unicodedata.category(c) != "Mn")
+
 def encode_text(text: str) -> str:
     """
     Gera UMA sequência de emojis para o texto (case-insensitive).
 
+    Antes de mapear, remove acentos das letras:
+    ex.: 'coé galera' -> 'coe galera' -> emojis.
     As “unidades” (emojis, espaços, pontuação) são separadas por um
     zero-width space (ZWSP), que não aparece visualmente, mas
     permite decodificar depois.
@@ -69,10 +79,16 @@ def encode_text(text: str) -> str:
     tokens = []
     for ch in text:
         if ch.isalpha():
-            letter = ch.upper()
+            # remove acento (é -> e, ã -> a, ç -> c, etc.)
+            base = remove_accents(ch)
+            # pode acontecer de virar mais de um char (tipo ß -> ss); pego o primeiro
+            base_letter = base[0] if base else ch
+            letter = base_letter.upper()
+
             if letter in LETTER_TO_EMOJIS:
                 tokens.append(random.choice(LETTER_TO_EMOJIS[letter]))
             else:
+                # se não tiver mapeamento, mantém o caractere original
                 tokens.append(ch)
         else:
             # mantém espaços, pontuação, quebras de linha etc. como tokens próprios

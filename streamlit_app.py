@@ -6,6 +6,8 @@ from pathlib import Path
 import streamlit as st
 import streamlit.components.v1 as components
 
+ZWSP = "\u200b"  # zero-width space (separador invisível)
+
 # -----------------------------
 # Carregar mapeamentos do TXT
 # -----------------------------
@@ -34,10 +36,10 @@ def load_mappings(path: str = "emoji_mapping.txt"):
         for line in f:
             line = line.strip()
             if not line:
-                continue  # pula linhas em branco
+                continue
             parts = line.split(",")
             if len(parts) < 2:
-                continue  # ignora linhas mal-formadas
+                continue
             letter = parts[0].strip().upper()
             emojis = [p for p in parts[1:] if p]
 
@@ -57,7 +59,13 @@ LETTER_TO_EMOJIS, EMOJI_TO_LETTER = load_mappings("emoji_mapping.txt")
 # Funções auxiliares
 # -----------------------------
 def encode_text(text: str) -> str:
-    """Gera UMA sequência de emojis para o texto (case-insensitive)."""
+    """
+    Gera UMA sequência de emojis para o texto (case-insensitive).
+
+    As “unidades” (emojis, espaços, pontuação) são separadas por um
+    zero-width space (ZWSP), que não aparece visualmente, mas
+    permite decodificar depois.
+    """
     tokens = []
     for ch in text:
         if ch.isalpha():
@@ -67,24 +75,36 @@ def encode_text(text: str) -> str:
             else:
                 tokens.append(ch)
         else:
-            # mantém espaços, pontuação, quebras de linha etc.
+            # mantém espaços, pontuação, quebras de linha etc. como tokens próprios
             tokens.append(ch)
-    # junta com espaço para facilitar o split depois
-    return " ".join(tokens)
+
+    # junta com separador invisível (sem espaços visíveis entre emojis)
+    return ZWSP.join(tokens)
 
 
 def decode_emojis(emoji_string: str) -> str:
-    """Decodifica uma sequência de emojis gerada pela função encode_text."""
+    """
+    Decodifica uma sequência de emojis gerada pela função encode_text.
+
+    Primeiro tenta separar pelo ZWSP; se por algum motivo não houver,
+    cai num fallback que separa por espaços (para textos “manuais”).
+    """
     if not emoji_string:
         return ""
-    # separa preservando blocos de espaço
-    parts = re.split(r"(\s+)", emoji_string)
+
+    if ZWSP in emoji_string:
+        parts = emoji_string.split(ZWSP)
+    else:
+        # fallback: separa por espaços, preservando blocos de espaço
+        parts = re.split(r"(\s+)", emoji_string)
+
     decoded = []
     for part in parts:
         if part == "":
             continue
         if part.isspace():
-            decoded.append(" ")
+            # preserva espaços/linhas exatamente como estão
+            decoded.append(part)
         else:
             decoded.append(EMOJI_TO_LETTER.get(part, part))
     return "".join(decoded)
@@ -94,7 +114,7 @@ def copy_button(text: str, label: str = "Copiar para área de transferência"):
     """Cria um botão simples de copiar para o clipboard via JS."""
     if not text:
         return
-    js_text = json.dumps(text)  # escapa direitinho pra JS
+    js_text = json.dumps(text)
     html = f"""
     <button onclick='navigator.clipboard.writeText({js_text})'>
         {label}
@@ -118,7 +138,6 @@ tab_encode, tab_decode = st.tabs(
     ["Codificar (texto ➜ emojis)", "Decodificar (emojis ➜ texto)"]
 )
 
-# Estado pra guardar o último resultado encodado
 if "encoded_text" not in st.session_state:
     st.session_state["encoded_text"] = ""
 
@@ -131,7 +150,7 @@ with tab_encode:
     text = st.text_area(
         "Digite o texto para codificar (case-insensitive):",
         height=150,
-        placeholder="Ex.: Hello World",
+        placeholder="Ex.: Oi gente!!!",
     )
 
     if st.button("Gerar sequência de emojis", type="primary"):
@@ -158,7 +177,7 @@ with tab_decode:
     emoji_input = st.text_area(
         "Cole aqui a sequência de emojis (como gerada na aba anterior):",
         height=150,
-        placeholder="Ex.: 🙉 📧 💺 🦕 🇯🇵 ,   🤙 🐋 🌊 🎪 🧩 !",
+        placeholder="Ex.: (cole aqui o resultado copiado da outra aba)",
     )
 
     decoded_text = ""

@@ -7,8 +7,6 @@ from pathlib import Path
 import streamlit as st
 import streamlit.components.v1 as components
 
-ZWSP = "\u200b"  # zero-width space (separador invisível)
-
 # -----------------------------
 # Carregar mapeamentos do TXT
 # -----------------------------
@@ -55,6 +53,9 @@ def load_mappings(path: str = "emoji_mapping.txt"):
 
 
 LETTER_TO_EMOJIS, EMOJI_TO_LETTER = load_mappings("emoji_mapping.txt")
+# lista de emojis ordenada por tamanho (nº de codepoints) decrescente,
+# para conseguir casar primeiro os emojis "compridos" (com ZWJ etc.)
+EMOJI_LIST_SORTED = sorted(EMOJI_TO_LETTER.keys(), key=len, reverse=True)
 
 # -----------------------------
 # Funções auxiliares
@@ -62,68 +63,83 @@ LETTER_TO_EMOJIS, EMOJI_TO_LETTER = load_mappings("emoji_mapping.txt")
 
 def remove_accents(ch: str) -> str:
     """Remove acentos de um caractere (ex.: 'é' -> 'e', 'ã' -> 'a')."""
-    # Normaliza em NFD e remove caracteres de marcação (Mn = Mark, Nonspacing)
     normalized = unicodedata.normalize("NFD", ch)
     return "".join(c for c in normalized if unicodedata.category(c) != "Mn")
+
 
 def encode_text(text: str) -> str:
     """
     Gera UMA sequência de emojis para o texto (case-insensitive).
 
-    Antes de mapear, remove acentos das letras:
-    ex.: 'coé galera' -> 'coe galera' -> emojis.
-    As “unidades” (emojis, espaços, pontuação) são separadas por um
-    zero-width space (ZWSP), que não aparece visualmente, mas
-    permite decodificar depois.
+    - Remove acentos antes de mapear (ex.: 'é' -> 'e').
+    - Letras viram emojis.
+    - Outros caracteres são mantidos.
+    - Um espaço simples ' ' entre palavras vira DOIS espaços na saída.
     """
     tokens = []
     for ch in text:
         if ch.isalpha():
-            # remove acento (é -> e, ã -> a, ç -> c, etc.)
             base = remove_accents(ch)
-            # pode acontecer de virar mais de um char (tipo ß -> ss); pego o primeiro
             base_letter = base[0] if base else ch
             letter = base_letter.upper()
 
             if letter in LETTER_TO_EMOJIS:
                 tokens.append(random.choice(LETTER_TO_EMOJIS[letter]))
             else:
-                # se não tiver mapeamento, mantém o caractere original
                 tokens.append(ch)
+        elif ch == " ":
+            # espaço simples vira dois espaços na saída
+            tokens.append("  ")
         else:
-            # mantém espaços, pontuação, quebras de linha etc. como tokens próprios
+            # mantém pontuação, quebras de linha etc.
             tokens.append(ch)
 
-    # junta com separador invisível (sem espaços visíveis entre emojis)
-    return ZWSP.join(tokens)
+    return "".join(tokens)
 
 
 def decode_emojis(emoji_string: str) -> str:
     """
     Decodifica uma sequência de emojis gerada pela função encode_text.
 
-    Primeiro tenta separar pelo ZWSP; se por algum motivo não houver,
-    cai num fallback que separa por espaços (para textos “manuais”).
+    - Conjuntos de espaços (um ou mais) viram UM espaço na saída.
+    - Emojis são identificados tentando casar os mais longos primeiro.
+    - Qualquer coisa que não seja reconhecida como emoji é copiada tal qual.
     """
     if not emoji_string:
         return ""
 
-    if ZWSP in emoji_string:
-        parts = emoji_string.split(ZWSP)
-    else:
-        # fallback: separa por espaços, preservando blocos de espaço
-        parts = re.split(r"(\s+)", emoji_string)
+    s = emoji_string
+    decoded_chars = []
+    i = 0
+    n = len(s)
 
-    decoded = []
-    for part in parts:
-        if part == "":
+    while i < n:
+        ch = s[i]
+
+        # Bloco de espaços / quebras de linha
+        if ch.isspace():
+            # consome todos os caracteres de espaço consecutivos
+            while i < n and s[i].isspace():
+                i += 1
+            # representa como um único espaço no texto decodificado
+            decoded_chars.append(" ")
             continue
-        if part.isspace():
-            # preserva espaços/linhas exatamente como estão
-            decoded.append(part)
-        else:
-            decoded.append(EMOJI_TO_LETTER.get(part, part))
-    return "".join(decoded)
+
+        # Tenta casar um emoji começando em i, pegando primeiro os maiores
+        matched = False
+        for emoji in EMOJI_LIST_SORTED:
+            if s.startswith(emoji, i):
+                decoded_chars.append(EMOJI_TO_LETTER[emoji])
+                i += len(emoji)
+                matched = True
+                break
+
+        if not matched:
+            # não é emoji conhecido: copia caractere literal
+            decoded_chars.append(ch)
+            i += 1
+
+    return "".join(decoded_chars)
 
 
 def copy_button(text: str, label: str = "Copiar para área de transferência"):
